@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; font-family: "Segoe UI", sans-serif; }
+      body {
+        background: linear-gradient(135deg, rgba(34, 50, 110, 0.15), rgba(230, 56, 136, 0.15));
+        display: flex; align-items: center; justify-content: center;
+      }
+      .card {
+        position: relative; width: 100%; height: 100%; padding: 28px;
+        background: #ffffff; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+        display: flex; flex-direction: column;
+      }
+      .main { flex: 1; }
+      h2 { margin: 0; font-size: 22px; color: rgb(34, 50, 110); font-weight: 700; }
+      .content { margin-top: 16px; font-size: 15px; line-height: 1.6; color: #333; }
+      .notice {
+        margin-top: 12px; padding: 10px 14px; background: rgba(230, 56, 136, 0.12);
+        border-radius: 10px; color: rgb(230, 56, 136); font-size: 13px; font-weight: 600;
+      }
+      .buttons { display: flex; gap: 16px; margin-top: 24px; }
+      button {
+        flex: 1; padding: 14px; font-size: 15px; font-weight: 700;
+        border-radius: 999px; border: none; cursor: pointer;
+      }
+      .no { background: #e5e7eb; color: #555; }
+      .yes { background: rgb(34, 50, 110); color: #ffffff; }
+      button:disabled { opacity: 0.6; cursor: not-allowed; }
+      
+      /* ローディング */
+      .overlay {
+        position: absolute; inset: 0; background: rgba(255, 255, 255, 0.85);
+        display: flex; align-items: center; justify-content: center;
+        opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+      }
+      .overlay.active { opacity: 1; pointer-events: auto; }
+      .overlay-inner { display: flex; flex-direction: column; align-items: center; gap: 14px; color: rgb(34, 50, 110); font-weight: 600; }
+      .spinner {
+        width: 40px; height: 40px; border: 4px solid rgba(34, 50, 110, 0.2);
+        border-top: 4px solid rgb(34, 50, 110); border-radius: 50%; animation: spin 1s linear infinite;
+      }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="main">
+        <h2>配置反映の確認</h2>
+        <div class="content">
+          K列に入力されている業務内容を、<br>出勤者（色付きセル）に一括で割り当てます。
+        </div>
+        <div class="notice">この操作は即時反映され、元に戻すことはできません。</div>
+      </div>
+      <div class="buttons">
+        <button class="no" id="noBtn" onclick="google.script.host.close()">キャンセル</button>
+        <button class="yes" id="yesBtn" onclick="run()">実行</button>
+      </div>
+      <div class="overlay" id="overlay">
+        <div class="overlay-inner">
+          <div>実行中です…</div>
+          <div class="spinner"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      function run() {
+        document.getElementById("yesBtn").disabled = true;
+        document.getElementById("noBtn").disabled = true;
+        document.getElementById("overlay").classList.add("active");
+        google.script.run
+          .withSuccessHandler(() => google.script.host.close())
+          .executePaste();
+      }
+    </script>
+  </body>
+</html>
