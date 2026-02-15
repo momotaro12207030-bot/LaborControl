@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
+body { font-family: 'Noto Sans JP', sans-serif; background-color: #f1f5f9; overflow: hidden; user-select: none; }
+#areaGrid { overflow-y: scroll; padding-bottom: 80px; }
+.draggable { cursor: grab; border-left-width: 6px; transition: transform 0.1s, box-shadow 0.2s; }
+.draggable:active { cursor: grabbing; transform: scale(1.02); }
+.selected { border: 2px solid #6366f1 !important; box-shadow: 0 0 15px rgba(99, 102, 241, 0.4); z-index: 10; }
+.search-miss { opacity: 0.1; filter: grayscale(1); pointer-events: none; }
+.tab-active { background-color: #4f46e5 !important; color: white !important; }
+.custom-scrollbar::-webkit-scrollbar { width: 6px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+#selection-box {
+position: fixed;
+border: 2px solid #6366f1;
+background: rgba(99, 102, 241, 0.15);
+display: none;
+z-index: 9999;
+pointer-events: none;
+box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+}
+* { outline: none !important; }
+*:focus { outline: none !important; }
+button:focus { outline: none !important; box-shadow: none !important; }
+input:focus { outline: none !important; }
+.sort-menu-container { position: relative; }
+.sort-menu {
+display: none;
+position: absolute;
+right: 0;
+top: 100%;
+margin-top: 4px;
+background: white;
+border: 1px solid #e2e8f0;
+border-radius: 8px;
+box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+z-index: 1000;
+min-width: 180px;
+}
+.sort-menu.show { display: block; }
+.sort-menu-item {
+padding: 8px 12px;
+cursor: pointer;
+font-size: 11px;
+transition: background-color 0.15s;
+display: flex;
+align-items: center;
+justify-content: space-between;
+color: #475569;
+}
+.sort-menu-item:first-child { border-radius: 8px 8px 0 0; }
+.sort-menu-item:last-child { border-radius: 0 0 8px 8px; }
+.sort-menu-item:hover { background-color: #f8fafc; }
+.sort-menu-item.active { background-color: #eef2ff; color: #4f46e5; font-weight: 600; }
+.sort-menu-item i { margin-right: 8px; width: 14px; }
+.sort-trigger {
+@apply text-[11px] text-slate-500 hover:text-indigo-600 hover:bg-slate-100 px-2 py-1.5 rounded transition-colors flex items-center gap-1 cursor-pointer;
+}
+.sort-trigger.active {
+@apply text-indigo-600 bg-indigo-50 font-semibold;
+}
+</style>
+</head>
+<body class="h-screen flex flex-col">
+<div id="selection-box"></div>
+<div id="toast-container" class="fixed bottom-5 right-5 z-[10000] flex flex-col gap-2"></div>
+
+<div class="bg-white border-b px-4 py-3 shadow-sm shrink-0 z-20">
+<div class="flex justify-between items-center mb-2">
+<div class="flex items-center gap-4">
+<h1 class="font-black text-xl text-indigo-900 tracking-tighter">LOGI-MATRIX <span class="text-[10px] font-normal text-slate-400">v6.5 OPTIMIZED</span></h1>
+<input type="text" id="staffSearch" placeholder="名前または所属で検索"
+class="w-80 text-xs py-2 px-4 bg-slate-100 rounded-full focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+</div>
+<div class="flex gap-2">
+<button onclick="undo()" id="btn-undo" class="p-2 text-slate-400 hover:text-indigo-600 disabled:opacity-20"><i class="fa-solid fa-undo"></i></button>
+<button onclick="redo()" id="btn-redo" class="p-2 text-slate-400 hover:text-indigo-600 disabled:opacity-20"><i class="fa-solid fa-redo"></i></button>
+<button id="btn-auto-assign" onclick="runAutoAssignByMainWork(this)" title="メイン業務で自動配置" class="bg-white border border-slate-200 hover:border-indigo-300 text-slate-600 hover:text-indigo-700 text-xs font-bold px-4 py-2.5 rounded-full shadow-sm transition-all flex items-center gap-2">
+<i class="fa-solid fa-wand-magic-sparkles"></i> <span>自動配置</span>
+</button>
+<button id="btn-save" onclick="saveData(this)" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-6 py-2.5 rounded-full shadow-lg transition-all flex items-center gap-2">
+<i class="fa-solid fa-save"></i> <span>保存</span>
+</button>
+</div>
+</div>
+<div id="tabContainer" class="flex gap-2 overflow-x-auto custom-scrollbar">
+<button onclick="filterByFloor('ALL')" id="tab-ALL" class="tab-active text-[10px] font-bold px-4 py-1.5 rounded-full bg-white text-slate-500 border border-slate-200">全体</button>
+</div>
+</div>
+
+<div class="flex-grow flex p-3 gap-3 overflow-hidden">
+<div class="w-64 flex flex-col bg-slate-200/50 rounded-2xl border shrink-0">
+<div class="p-3 border-b flex justify-between items-center bg-white/50 rounded-t-2xl">
+<div class="flex items-center gap-2">
+<span class="text-[10px] font-black text-slate-500 uppercase">Pool</span>
+<span id="poolCount" class="bg-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm text-slate-600">0</span>
+</div>
+<div class="sort-menu-container">
+<button class="sort-trigger" id="sort-trigger-pool">
+<i class="fa-solid fa-sort"></i>
+<span id="sort-label-pool">並替</span>
+</button>
+<div class="sort-menu" id="sort-menu-pool"></div>
+</div>
+</div>
+<div id="pool" ondragover="event.preventDefault()" ondrop="handleDrop(event, 'pool')" class="flex-grow overflow-y-auto p-2 custom-scrollbar"></div>
+</div>
+<div id="areaGrid" class="flex-grow grid grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 custom-scrollbar"></div>
+</div>
+
+<script>
+let state = {
+assignments: { pool: [] },
+config: [],
+companyColors: {},
+floor: 'ALL',
+selected: new Set(),
+sortState: { pool: { type: null, order: null } }
+};
+let history = { stack: [], pointer: -1 };
+let startX = 0, startY = 0, isMarquee = false;
+let scrollPositions = {};
+let searchQuery = '';
+let areaIndexMap = {};
+
+window.onload = function() {
+google.script.run.withSuccessHandler(res => {
+state.assignments = res.assignments;
+state.config = res.config;
+state.companyColors = res.companyColors;
+state.sortState = { pool: { type: null, order: null } };
+areaIndexMap = Object.fromEntries(state.config.map(a => [a.id, a]));
+pushHistory();
+setupTabs();
+setupPoolSortMenu();
+setupSearchInput();
+renderAll();
+}).getStaffDataFromSheet76();
+
+document.addEventListener('mousedown', startMarquee);
+document.addEventListener('mousemove', updateMarquee);
+document.addEventListener('mouseup', endMarquee);
+document.addEventListener('click', function(e) {
+if (!e.target.closest('.sort-menu-container')) closeAllSortMenus();
+});
+};
+
+function setupSearchInput() {
+const input = document.getElementById('staffSearch');
+let timer = null;
+input.addEventListener('input', () => {
+clearTimeout(timer);
+timer = setTimeout(() => {
+searchQuery = input.value.toLowerCase();
+renderAll();
+}, 80);
+});
+}
+
+function saveScrollPositions() {
+const poolEl = document.getElementById('pool');
+if (poolEl) scrollPositions.pool = poolEl.scrollTop;
+for (let i = 0; i < state.config.length; i++) {
+const area = state.config[i];
+const areaEl = document.getElementById(area.id);
+if (areaEl) scrollPositions[area.id] = areaEl.scrollTop;
+}
+}
+
+function restoreScrollPositions() {
+requestAnimationFrame(() => {
+const poolEl = document.getElementById('pool');
+if (poolEl && scrollPositions.pool !== undefined) poolEl.scrollTop = scrollPositions.pool;
+for (let i = 0; i < state.config.length; i++) {
+const area = state.config[i];
+const areaEl = document.getElementById(area.id);
+if (areaEl && scrollPositions[area.id] !== undefined) areaEl.scrollTop = scrollPositions[area.id];
+}
+});
+}
+
+function setupPoolSortMenu() {
+const menuHTML = `
+<div class="sort-menu-item" data-type="name" data-order="asc"><span><i class="fa-solid fa-arrow-up-a-z"></i>名前 昇順</span></div>
+<div class="sort-menu-item" data-type="name" data-order="desc"><span><i class="fa-solid fa-arrow-down-z-a"></i>名前 降順</span></div>
+<div class="sort-menu-item" data-type="company" data-order="asc"><span><i class="fa-solid fa-building"></i>会社 昇順</span></div>
+<div class="sort-menu-item" data-type="company" data-order="desc"><span><i class="fa-solid fa-building"></i>会社 降順</span></div>
+<div class="sort-menu-item" data-type="company-name" data-order="asc"><span><i class="fa-solid fa-layer-group"></i>会社→名前 昇順</span></div>
+<div class="sort-menu-item" data-type="company-name" data-order="desc"><span><i class="fa-solid fa-layer-group"></i>会社→名前 降順</span></div>`;
+const menu = document.getElementById('sort-menu-pool');
+if (!menu) return;
+menu.innerHTML = menuHTML;
+menu.querySelectorAll('.sort-menu-item').forEach(item => {
+item.addEventListener('click', function(e) {
+e.stopPropagation();
+e.preventDefault();
+sortPool(this.getAttribute('data-type'), this.getAttribute('data-order'));
+});
+});
+const trigger = document.getElementById('sort-trigger-pool');
+if (trigger) {
+trigger.addEventListener('click', function(e) {
+e.stopPropagation();
+e.preventDefault();
+togglePoolSortMenu();
+});
+}
+}
+
+function togglePoolSortMenu() {
+const menu = document.getElementById('sort-menu-pool');
+const wasShown = menu.classList.contains('show');
+closeAllSortMenus();
+if (!wasShown) {
+menu.classList.add('show');
+updatePoolSortMenuActive();
+}
+}
+function closeAllSortMenus() { document.querySelectorAll('.sort-menu').forEach(m => m.classList.remove('show')); }
+
+function updatePoolSortMenuActive() {
+const sortState = state.sortState.pool;
+const menu = document.getElementById('sort-menu-pool');
+if (!menu) return;
+menu.querySelectorAll('.sort-menu-item').forEach(item => {
+const active = sortState && sortState.type && sortState.order &&
+item.getAttribute('data-type') === sortState.type && item.getAttribute('data-order') === sortState.order;
+item.classList.toggle('active', active);
+});
+}
+
+function sortPool(type, order) {
+const list = state.assignments.pool;
+if (!list || list.length === 0) { closeAllSortMenus(); return; }
+applySorting(list, type, order);
+state.sortState.pool = { type, order };
+pushHistory();
+closeAllSortMenus();
+renderAll();
+const orderText = order === 'asc' ? '昇順' : '降順';
+const typeText = type === 'name' ? '名前' : type === 'company' ? '会社' : '会社→名前';
+showToast(`${typeText}（${orderText}）で並び替え完了`, 'indigo');
+}
+
+function applySorting(list, type, order) {
+const multiplier = order === 'asc' ? 1 : -1;
+if (type === 'name') list.sort((a, b) => multiplier * a.name.localeCompare(b.name, 'ja'));
+if (type === 'company') list.sort((a, b) => multiplier * a.company.localeCompare(b.company, 'ja'));
+if (type === 'company-name') {
+list.sort((a, b) => {
+const companyCmp = a.company.localeCompare(b.company, 'ja');
+if (companyCmp !== 0) return multiplier * companyCmp;
+return multiplier * a.name.localeCompare(b.name, 'ja');
+});
+}
+}
+
+function getSortLabel(sortState) {
+if (!sortState || !sortState.type) return '並替';
+const label = sortState.type === 'name' ? '名前' : sortState.type === 'company' ? '会社' : '会社→名';
+return `${label}${sortState.order === 'asc' ? '↑' : '↓'}`;
+}
+
+function renderAll() {
+saveScrollPositions();
+const q = searchQuery;
+const createCard = s => {
+const isSel = state.selected.has(s.id);
+const color = state.companyColors[s.company] || '#cbd5e1';
+const isHit = !q || s.name.toLowerCase().includes(q) || s.company.toLowerCase().includes(q);
+return `<div draggable="true" data-id="${s.id}" ondragstart="handleDrag(event, '${s.id}')" onmousedown="handleStaffMousedown(event, '${s.id}')"
+class="draggable ${isSel ? 'selected' : ''} ${isHit ? '' : 'search-miss'} bg-white p-2 rounded-lg shadow-sm mb-2 border border-slate-100"
+style="border-left-color: ${color}">
+<div class="text-[9px] font-bold opacity-70 mb-0.5" style="color: ${color}">${s.company}</div>
+<div class="font-bold text-[13px] text-slate-800">${s.name}</div>
+${s.attr ? `<div class="text-[9px] text-slate-400 mt-1 truncate border-t border-slate-50 pt-1">${s.attr}</div>` : ''}
+</div>`;
+};
+
+document.getElementById('pool').innerHTML = state.assignments.pool.map(createCard).join('');
+document.getElementById('poolCount').innerText = state.assignments.pool.length;
+const poolSortLabel = document.getElementById('sort-label-pool');
+const poolSortTrigger = document.getElementById('sort-trigger-pool');
+if (poolSortLabel) {
+poolSortLabel.innerText = getSortLabel(state.sortState.pool);
+poolSortTrigger.classList.toggle('active', Boolean(state.sortState.pool && state.sortState.pool.type));
+}
+
+const targets = state.floor === 'ALL' ? state.config : state.config.filter(i => i.floor === state.floor);
+document.getElementById('areaGrid').innerHTML = targets.map(area => {
+const list = state.assignments[area.id] || [];
+return `<div class="bg-white rounded-2xl border flex flex-col h-[280px] shadow-sm">
+<div class="px-3 py-2 bg-slate-50 border-b flex justify-between items-center shrink-0">
+<div class="flex flex-col overflow-hidden">
+<span class="text-[11px] font-bold text-slate-600 truncate" title="${area.name}">${area.name}</span>
+<span class="text-[9px] text-slate-400 font-mono">${list.length}名</span>
+</div>
+</div>
+<div id="${area.id}" ondragover="event.preventDefault()" ondrop="handleDrop(event, '${area.id}')" class="flex-grow p-2 overflow-y-auto custom-scrollbar">
+${list.map(createCard).join('')}
+</div>
+</div>`;
+}).join('');
+restoreScrollPositions();
+}
+
+function refreshSelectionOnly() {
+document.querySelectorAll('.draggable').forEach(el => {
+el.classList.toggle('selected', state.selected.has(el.dataset.id));
+});
+}
+
+function startMarquee(e) {
+if (e.target.closest('.draggable') || e.target.closest('button') || e.target.closest('input')) return;
+isMarquee = true;
+startX = e.clientX;
+startY = e.clientY;
+const box = document.getElementById('selection-box');
+box.style.display = 'block';
+box.style.left = `${startX}px`;
+box.style.top = `${startY}px`;
+box.style.width = '0px';
+box.style.height = '0px';
+if (!e.ctrlKey) {
+state.selected.clear();
+refreshSelectionOnly();
+}
+}
+
+function updateMarquee(e) {
+if (!isMarquee) return;
+const x = Math.min(startX, e.clientX);
+const y = Math.min(startY, e.clientY);
+const w = Math.abs(startX - e.clientX);
+const h = Math.abs(startY - e.clientY);
+const box = document.getElementById('selection-box');
+box.style.left = `${x}px`;
+box.style.top = `${y}px`;
+box.style.width = `${w}px`;
+box.style.height = `${h}px`;
+
+document.querySelectorAll('.draggable').forEach(el => {
+const r = el.getBoundingClientRect();
+const intersects = !(r.right < x || r.left > x + w || r.bottom < y || r.top > y + h);
+if (intersects) state.selected.add(el.dataset.id);
+});
+refreshSelectionOnly();
+}
+
+function endMarquee() {
+if (!isMarquee) return;
+isMarquee = false;
+document.getElementById('selection-box').style.display = 'none';
+}
+
+function saveData(btn, actionType = 'CHECK') {
+const labelSpan = btn.querySelector('span');
+const icon = btn.querySelector('i');
+if (actionType === 'CHECK') {
+btn.disabled = true;
+btn.classList.add('opacity-75', 'cursor-not-allowed');
+icon.className = 'fa-solid fa-circle-notch fa-spin';
+labelSpan.innerText = '処理中...';
+}
+google.script.run
+.withSuccessHandler(res => {
+if (res.confirmNeeded) {
+const msg = `マスタに存在しない名前が ${res.unknownNames.length} 件あります。\nこれらを削除して保存しますか？`;
+if (confirm(msg)) saveData(btn, 'DELETE');
+else saveData(btn, 'KEEP');
+return;
+}
+resetSaveButton(btn);
+showToast(res.success ? '保存完了' : `エラー: ${res.message}`, res.success ? 'indigo' : 'rose');
+})
+.withFailureHandler(err => {
+resetSaveButton(btn);
+showToast(`通信エラー: ${err.message}`, 'rose');
+})
+.saveAssignmentsToSheet76(JSON.stringify(state.assignments), actionType);
+}
+
+function resetSaveButton(btn) {
+btn.disabled = false;
+btn.classList.remove('opacity-75', 'cursor-not-allowed');
+btn.querySelector('i').className = 'fa-solid fa-save';
+btn.querySelector('span').innerText = '保存';
+}
+
+function runAutoAssignByMainWork(btn) {
+const labelSpan = btn.querySelector('span');
+const icon = btn.querySelector('i');
+btn.disabled = true;
+btn.classList.add('opacity-75', 'cursor-not-allowed');
+icon.className = 'fa-solid fa-circle-notch fa-spin';
+labelSpan.innerText = '配置中...';
+
+google.script.run
+.withSuccessHandler(res => {
+btn.disabled = false;
+btn.classList.remove('opacity-75', 'cursor-not-allowed');
+icon.className = 'fa-solid fa-wand-magic-sparkles';
+labelSpan.innerText = '自動配置';
+
+if (!res || !res.success) {
+showToast(`自動配置エラー: ${res && res.message ? res.message : '不明なエラー'}`, 'rose');
+return;
+}
+
+state.assignments = res.assignments;
+state.selected.clear();
+pushHistory();
+renderAll();
+
+let msg = `自動配置完了（移動: ${res.movedCount || 0}件）`;
+if (res.unmatchedMainWorks && res.unmatchedMainWorks.length > 0) {
+msg += ` 未対応業務: ${res.unmatchedMainWorks.length}件`;
+}
+showToast(msg, 'indigo');
+})
+.withFailureHandler(err => {
+btn.disabled = false;
+btn.classList.remove('opacity-75', 'cursor-not-allowed');
+icon.className = 'fa-solid fa-wand-magic-sparkles';
+labelSpan.innerText = '自動配置';
+showToast(`通信エラー: ${err.message}`, 'rose');
+})
+.autoAssignByMainWork(JSON.stringify(state.assignments));
+}
+
+function pushHistory() {
+if (history.pointer < history.stack.length - 1) history.stack.splice(history.pointer + 1);
+history.stack.push(JSON.parse(JSON.stringify(state.assignments)));
+if (history.stack.length > 50) history.stack.shift();
+else history.pointer++;
+updateHistoryButtons();
+}
+function undo() {
+if (history.pointer <= 0) return;
+history.pointer--;
+state.assignments = JSON.parse(JSON.stringify(history.stack[history.pointer]));
+renderAll();
+updateHistoryButtons();
+}
+function redo() {
+if (history.pointer >= history.stack.length - 1) return;
+history.pointer++;
+state.assignments = JSON.parse(JSON.stringify(history.stack[history.pointer]));
+renderAll();
+updateHistoryButtons();
+}
+function updateHistoryButtons() {
+document.getElementById('btn-undo').disabled = history.pointer <= 0;
+document.getElementById('btn-redo').disabled = history.pointer >= history.stack.length - 1;
+}
+
+function setupTabs() {
+const floors = [...new Set(state.config.map(i => i.floor))];
+const container = document.getElementById('tabContainer');
+floors.forEach(f => {
+const btn = document.createElement('button');
+btn.id = `tab-${f}`;
+btn.className = 'text-[10px] font-bold px-4 py-1.5 rounded-full bg-white text-slate-500 border border-slate-200 transition-all';
+btn.innerText = f;
+btn.onclick = () => filterByFloor(f);
+container.appendChild(btn);
+});
+}
+function filterByFloor(f) {
+state.floor = f;
+document.querySelectorAll('#tabContainer button').forEach(b => b.classList.remove('tab-active'));
+document.getElementById(`tab-${f}`).classList.add('tab-active');
+renderAll();
+}
+function handleStaffMousedown(e, id) {
+e.stopPropagation();
+if (!e.ctrlKey && !state.selected.has(id)) state.selected.clear();
+state.selected.add(id);
+refreshSelectionOnly();
+}
+function handleDrag(e, id) {
+const from = Object.keys(state.assignments).find(k => state.assignments[k].some(s => s.id === id));
+const selectedIds = state.selected.has(id) ? Array.from(state.selected) : [id];
+e.dataTransfer.setData('text/plain', JSON.stringify({ ids: selectedIds, from }));
+}
+function handleDrop(e, to) {
+e.preventDefault();
+const raw = e.dataTransfer.getData('text/plain');
+if (!raw) return;
+const data = JSON.parse(raw);
+if (data.from === to || !state.assignments[data.from] || !state.assignments[to]) return;
+
+data.ids.forEach(id => {
+const idx = state.assignments[data.from].findIndex(s => s.id === id);
+if (idx !== -1) state.assignments[to].push(state.assignments[data.from].splice(idx, 1)[0]);
+});
+state.selected.clear();
+pushHistory();
+renderAll();
+}
+
+function showToast(msg, color) {
+const e = document.createElement('div');
+e.className = `p-3 rounded-lg shadow-xl text-white font-bold text-xs bg-${color}-600`;
+e.innerText = msg;
+document.getElementById('toast-container').appendChild(e);
+setTimeout(() => e.remove(), 3000);
+}
+</script>
+</body>
+</html>
