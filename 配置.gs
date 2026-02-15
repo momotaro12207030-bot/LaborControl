@@ -423,3 +423,308 @@ function writeAssignmentsToSheet(sheet, data, config) {
     }
   });
 }
+
+const OPS_SHEET_NAMES = {
+  STAFF_MASTER: 'スタッフマスタ',
+  SHIFT: 'シフト表',
+  EXTRA: '追加人員',
+  ATTENDANCE: '出勤者',
+  WORK_MASTER: '作業マスタ',
+  ASSIGNMENT: '配置表',
+  PROGRESS_INPUT: '進捗入力',
+  PRODUCTIVITY: '個人別生産性'
+};
+
+function generateAttendance(date) {
+  const targetDate = normalizeDateInput_(date);
+  const weekday = getWeekdayJa_(targetDate);
+  const staffSheet = getRequiredSheet_(OPS_SHEET_NAMES.STAFF_MASTER);
+  const shiftSheet = getRequiredSheet_(OPS_SHEET_NAMES.SHIFT);
+  const extraSheet = getRequiredSheet_(OPS_SHEET_NAMES.EXTRA);
+  const attendanceSheet = getRequiredSheet_(OPS_SHEET_NAMES.ATTENDANCE);
+
+  const staffRows = readSheetObjects_(staffSheet);
+  const shiftRows = readSheetObjects_(shiftSheet);
+  const extraRows = readSheetObjects_(extraSheet);
+  const staffById = {};
+
+  staffRows.forEach(row => {
+    const staffId = toText_(row['スタッフID']);
+    if (staffId) {
+      staffById[staffId] = {
+        名前: toText_(row['名前']),
+        会社: toText_(row['会社']),
+        雇用区分: toText_(row['雇用区分'])
+      };
+    }
+  });
+
+  const mergedMap = new Map();
+
+  shiftRows.forEach(row => {
+    const staffId = toText_(row['スタッフID']);
+    const shiftValue = toText_(row[weekday]);
+    if (!staffId || shiftValue !== '○') return;
+
+    const master = staffById[staffId] || {};
+    mergedMap.set(staffId, {
+      日付: formatDateKey_(targetDate),
+      スタッフID: staffId,
+      名前: toText_(master.名前),
+      会社: toText_(master.会社),
+      雇用区分: toText_(master.雇用区分)
+    });
+  });
+
+  extraRows.forEach(row => {
+    const rowDate = normalizeDateString_(row['日付']);
+    const targetDateKey = formatDateKey_(targetDate);
+    if (rowDate !== targetDateKey) return;
+
+    const staffId = toText_(row['スタッフID']);
+    if (!staffId) return;
+    mergedMap.set(staffId, {
+      日付: targetDateKey,
+      スタッフID: staffId,
+      名前: toText_(row['名前']),
+      会社: toText_(row['会社']),
+      雇用区分: toText_(row['雇用区分'])
+    });
+  });
+
+  const attendanceRows = Array.from(mergedMap.values())
+    .sort((a, b) => a['スタッフID'].localeCompare(b['スタッフID'], 'ja'));
+
+  replaceRowsByDate_(attendanceSheet, '日付', formatDateKey_(targetDate), [
+    '日付', 'スタッフID', '名前', '会社', '雇用区分'
+  ], attendanceRows);
+
+  return {
+    date: formatDateKey_(targetDate),
+    count: attendanceRows.length,
+    message: `出勤者を ${attendanceRows.length} 名生成しました。`
+  };
+}
+
+function assignWork(date) {
+  const targetDate = normalizeDateInput_(date);
+  const targetDateKey = formatDateKey_(targetDate);
+  const attendanceSheet = getRequiredSheet_(OPS_SHEET_NAMES.ATTENDANCE);
+  const workSheet = getRequiredSheet_(OPS_SHEET_NAMES.WORK_MASTER);
+  const assignmentSheet = getRequiredSheet_(OPS_SHEET_NAMES.ASSIGNMENT);
+
+  const attendanceRows = readSheetObjects_(attendanceSheet)
+    .filter(row => normalizeDateString_(row['日付']) === targetDateKey);
+  const workRows = readSheetObjects_(workSheet)
+    .filter(row => toText_(row['作業ID']));
+
+  if (workRows.length === 0) {
+    throw new Error('作業マスタに作業IDがありません。');
+  }
+
+  const assignments = attendanceRows.map((row, index) => {
+    const work = workRows[index % workRows.length];
+    return {
+      日付: targetDateKey,
+      スタッフID: toText_(row['スタッフID']),
+      作業ID: toText_(work['作業ID'])
+    };
+  });
+
+  replaceRowsByDate_(assignmentSheet, '日付', targetDateKey, ['日付', 'スタッフID', '作業ID'], assignments);
+
+  return {
+    date: targetDateKey,
+    count: assignments.length,
+    message: `作業割り振りを ${assignments.length} 件作成しました。`
+  };
+}
+
+function calculateThroughput(date) {
+  const targetDate = normalizeDateInput_(date);
+  const targetDateKey = formatDateKey_(targetDate);
+  const assignmentSheet = getRequiredSheet_(OPS_SHEET_NAMES.ASSIGNMENT);
+  const workSheet = getRequiredSheet_(OPS_SHEET_NAMES.WORK_MASTER);
+
+  const assignmentRows = readSheetObjects_(assignmentSheet)
+    .filter(row => normalizeDateString_(row['日付']) === targetDateKey);
+  const workRows = readSheetObjects_(workSheet);
+
+  const tpByWork = {};
+  workRows.forEach(row => {
+    const workId = toText_(row['作業ID']);
+    if (!workId) return;
+    tpByWork[workId] = Number(row['基準TP（1人あたり）']) || 0;
+  });
+
+  let totalThroughput = 0;
+  assignmentRows.forEach(row => {
+    const workId = toText_(row['作業ID']);
+    totalThroughput += tpByWork[workId] || 0;
+  });
+
+  return {
+    date: targetDateKey,
+    assignedCount: assignmentRows.length,
+    totalThroughput
+  };
+}
+
+function calculateProgress(date) {
+  const targetDate = normalizeDateInput_(date);
+  const targetDateKey = formatDateKey_(targetDate);
+  const progressSheet = getRequiredSheet_(OPS_SHEET_NAMES.PROGRESS_INPUT);
+  const progressRows = readSheetObjects_(progressSheet)
+    .filter(row => normalizeDateString_(row['日付']) === targetDateKey);
+
+  const actual = progressRows.reduce((sum, row) => sum + (Number(row['実績数']) || 0), 0);
+  const throughput = calculateThroughput(targetDate);
+  const target = Number(throughput.totalThroughput) || 0;
+
+  return {
+    date: targetDateKey,
+    actual,
+    target,
+    diff: actual - target
+  };
+}
+
+function calculateProductivity(date) {
+  const targetDate = normalizeDateInput_(date);
+  const targetDateKey = formatDateKey_(targetDate);
+  const progressSheet = getRequiredSheet_(OPS_SHEET_NAMES.PROGRESS_INPUT);
+  const productivitySheet = getRequiredSheet_(OPS_SHEET_NAMES.PRODUCTIVITY);
+  const rows = readSheetObjects_(progressSheet)
+    .filter(row => normalizeDateString_(row['日付']) === targetDateKey);
+
+  const output = rows.map(row => {
+    const actual = Number(row['実績数']) || 0;
+    const workHours =
+      Number(row['作業時間']) ||
+      Number(row['稼働時間']) ||
+      Number(row['時間']) ||
+      1;
+
+    return {
+      スタッフID: toText_(row['スタッフID']),
+      日付: targetDateKey,
+      作業ID: toText_(row['作業ID']),
+      実績数: actual,
+      生産性: workHours > 0 ? actual / workHours : 0
+    };
+  });
+
+  replaceRowsByDate_(productivitySheet, '日付', targetDateKey,
+    ['スタッフID', '日付', '作業ID', '実績数', '生産性'], output);
+
+  return {
+    date: targetDateKey,
+    count: output.length
+  };
+}
+
+function getRequiredSheet_(sheetName) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) {
+    throw new Error(`シートが見つかりません: ${sheetName}`);
+  }
+  return sheet;
+}
+
+function readSheetObjects_(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return [];
+
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(header => toText_(header));
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+  return values.map(row => {
+    const obj = {};
+    headers.forEach((header, index) => {
+      if (!header) return;
+      obj[header] = row[index];
+    });
+    return obj;
+  });
+}
+
+function replaceRowsByDate_(sheet, dateHeader, dateKey, requiredHeaders, newRows) {
+  const headers = ensureHeaders_(sheet, requiredHeaders);
+  const dateColIndex = headers.indexOf(dateHeader);
+  if (dateColIndex === -1) {
+    throw new Error(`日付列が見つかりません: ${dateHeader}`);
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    const valueRange = sheet.getRange(2, 1, lastRow - 1, headers.length);
+    const values = valueRange.getValues();
+    const remained = values.filter(row => normalizeDateString_(row[dateColIndex]) !== dateKey);
+
+    const merged = remained.concat(newRows.map(rowObj => headers.map(header => rowObj[header] ?? '')));
+    valueRange.clearContent();
+    if (merged.length > 0) {
+      sheet.getRange(2, 1, merged.length, headers.length).setValues(merged);
+    }
+    if (merged.length < values.length) {
+      sheet.getRange(2 + merged.length, 1, values.length - merged.length, headers.length).clearContent();
+    }
+    return;
+  }
+
+  if (newRows.length > 0) {
+    const output = newRows.map(rowObj => headers.map(header => rowObj[header] ?? ''));
+    sheet.getRange(2, 1, output.length, headers.length).setValues(output);
+  }
+}
+
+function ensureHeaders_(sheet, requiredHeaders) {
+  const lastCol = Math.max(sheet.getLastColumn(), requiredHeaders.length);
+  let headers = lastCol > 0
+    ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(value => toText_(value))
+    : [];
+
+  if (headers.length === 0) {
+    headers = requiredHeaders.slice();
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    return headers;
+  }
+
+  requiredHeaders.forEach(header => {
+    if (!headers.includes(header)) headers.push(header);
+  });
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  return headers;
+}
+
+function normalizeDateInput_(value) {
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    return value;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`不正な日付です: ${value}`);
+  }
+  return parsed;
+}
+
+function normalizeDateString_(value) {
+  if (!value) return '';
+  const dateObj = normalizeDateInput_(value);
+  return formatDateKey_(dateObj);
+}
+
+function formatDateKey_(dateObj) {
+  return Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+}
+
+function getWeekdayJa_(dateObj) {
+  return ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
+}
+
+function toText_(value) {
+  return String(value ?? '').trim();
+}
