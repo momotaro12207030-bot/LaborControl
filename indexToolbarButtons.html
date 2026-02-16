@@ -1,0 +1,10 @@
+<div class="flex gap-2">
+  <button onclick="undo()" id="btn-undo" class="p-2 text-slate-400 hover:text-indigo-600 disabled:opacity-20"><i class="fa-solid fa-undo"></i></button>
+  <button onclick="redo()" id="btn-redo" class="p-2 text-slate-400 hover:text-indigo-600 disabled:opacity-20"><i class="fa-solid fa-redo"></i></button>
+  <button id="btn-auto-assign" onclick="runAutoAssignByMainWork(this)" title="メイン業務で自動配置" class="bg-white border border-slate-200 hover:border-indigo-300 text-slate-600 hover:text-indigo-700 text-xs font-bold px-4 py-2.5 rounded-full shadow-sm transition-all flex items-center gap-2">
+    <i class="fa-solid fa-wand-magic-sparkles"></i> <span>自動配置</span>
+  </button>
+  <button id="btn-save" onclick="saveData(this)" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-6 py-2.5 rounded-full shadow-lg transition-all flex items-center gap-2">
+    <i class="fa-solid fa-save"></i> <span>保存</span>
+  </button>
+</div>

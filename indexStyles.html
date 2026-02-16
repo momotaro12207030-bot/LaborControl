@@ -1,0 +1,61 @@
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
+body { font-family: 'Noto Sans JP', sans-serif; background-color: #f1f5f9; overflow: hidden; user-select: none; }
+#areaGrid { overflow-y: scroll; padding-bottom: 80px; }
+.draggable { cursor: grab; border-left-width: 6px; transition: transform 0.1s, box-shadow 0.2s; }
+.draggable:active { cursor: grabbing; transform: scale(1.02); }
+.selected { border: 2px solid #6366f1 !important; box-shadow: 0 0 15px rgba(99, 102, 241, 0.4); z-index: 10; }
+.search-miss { opacity: 0.1; filter: grayscale(1); pointer-events: none; }
+.tab-active { background-color: #4f46e5 !important; color: white !important; }
+.custom-scrollbar::-webkit-scrollbar { width: 6px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+#selection-box {
+  position: fixed;
+  border: 2px solid #6366f1;
+  background: rgba(99, 102, 241, 0.15);
+  display: none;
+  z-index: 9999;
+  pointer-events: none;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+}
+* { outline: none !important; }
+*:focus { outline: none !important; }
+button:focus { outline: none !important; box-shadow: none !important; }
+input:focus { outline: none !important; }
+.sort-menu-container { position: relative; }
+.sort-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  z-index: 1000;
+  min-width: 180px;
+}
+.sort-menu.show { display: block; }
+.sort-menu-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background-color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #475569;
+}
+.sort-menu-item:first-child { border-radius: 8px 8px 0 0; }
+.sort-menu-item:last-child { border-radius: 0 0 8px 8px; }
+.sort-menu-item:hover { background-color: #f8fafc; }
+.sort-menu-item.active { background-color: #eef2ff; color: #4f46e5; font-weight: 600; }
+.sort-menu-item i { margin-right: 8px; width: 14px; }
+.sort-trigger {
+  @apply text-[11px] text-slate-500 hover:text-indigo-600 hover:bg-slate-100 px-2 py-1.5 rounded transition-colors flex items-center gap-1 cursor-pointer;
+}
+.sort-trigger.active {
+  @apply text-indigo-600 bg-indigo-50 font-semibold;
+}
+</style>

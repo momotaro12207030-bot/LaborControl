@@ -1,0 +1,310 @@
+let state = {
+  assignments: { pool: [] },
+  config: [],
+  companyColors: {},
+  floor: 'ALL',
+  selected: new Set(),
+  sortState: { pool: { type: null, order: null } }
+};
+let history = { stack: [], pointer: -1 };
+let startX = 0;
+let startY = 0;
+let isMarquee = false;
+let scrollPositions = {};
+let searchQuery = '';
+
+window.onload = function() {
+  google.script.run.withSuccessHandler(res => {
+    state.assignments = res.assignments;
+    state.config = res.config;
+    state.companyColors = res.companyColors;
+    state.sortState = { pool: { type: null, order: null } };
+
+    pushHistory();
+    setupTabs();
+    setupPoolSortMenu();
+    setupSearchInput();
+    renderAll();
+  }).getStaffDataFromSheet76();
+
+  document.addEventListener('mousedown', startMarquee);
+  document.addEventListener('mousemove', updateMarquee);
+  document.addEventListener('mouseup', endMarquee);
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.sort-menu-container')) closeAllSortMenus();
+  });
+};
+
+function setupSearchInput() {
+  const input = document.getElementById('staffSearch');
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      searchQuery = input.value.toLowerCase();
+      renderAll();
+    }, 80);
+  });
+}
+
+function saveScrollPositions() {
+  const poolEl = document.getElementById('pool');
+  if (poolEl) scrollPositions.pool = poolEl.scrollTop;
+  for (let i = 0; i < state.config.length; i++) {
+    const area = state.config[i];
+    const areaEl = document.getElementById(area.id);
+    if (areaEl) scrollPositions[area.id] = areaEl.scrollTop;
+  }
+}
+
+function restoreScrollPositions() {
+  requestAnimationFrame(() => {
+    const poolEl = document.getElementById('pool');
+    if (poolEl && scrollPositions.pool !== undefined) poolEl.scrollTop = scrollPositions.pool;
+    for (let i = 0; i < state.config.length; i++) {
+      const area = state.config[i];
+      const areaEl = document.getElementById(area.id);
+      if (areaEl && scrollPositions[area.id] !== undefined) areaEl.scrollTop = scrollPositions[area.id];
+    }
+  });
+}
+
+function setupPoolSortMenu() {
+  const menuHTML = `
+<div class="sort-menu-item" data-type="name" data-order="asc"><span><i class="fa-solid fa-arrow-up-a-z"></i>名前 昇順</span></div>
+<div class="sort-menu-item" data-type="name" data-order="desc"><span><i class="fa-solid fa-arrow-down-z-a"></i>名前 降順</span></div>
+<div class="sort-menu-item" data-type="company" data-order="asc"><span><i class="fa-solid fa-building"></i>会社 昇順</span></div>
+<div class="sort-menu-item" data-type="company" data-order="desc"><span><i class="fa-solid fa-building"></i>会社 降順</span></div>
+<div class="sort-menu-item" data-type="company-name" data-order="asc"><span><i class="fa-solid fa-layer-group"></i>会社→名前 昇順</span></div>
+<div class="sort-menu-item" data-type="company-name" data-order="desc"><span><i class="fa-solid fa-layer-group"></i>会社→名前 降順</span></div>`;
+  const menu = document.getElementById('sort-menu-pool');
+  if (!menu) return;
+  menu.innerHTML = menuHTML;
+  menu.querySelectorAll('.sort-menu-item').forEach(item => {
+    item.addEventListener('click', function(e) {
+      e.stopPropagation();
+      e.preventDefault();
+      sortPool(this.getAttribute('data-type'), this.getAttribute('data-order'));
+    });
+  });
+  const trigger = document.getElementById('sort-trigger-pool');
+  if (trigger) {
+    trigger.addEventListener('click', function(e) {
+      e.stopPropagation();
+      e.preventDefault();
+      togglePoolSortMenu();
+    });
+  }
+}
+
+function togglePoolSortMenu() {
+  const menu = document.getElementById('sort-menu-pool');
+  const wasShown = menu.classList.contains('show');
+  closeAllSortMenus();
+  if (!wasShown) {
+    menu.classList.add('show');
+    updatePoolSortMenuActive();
+  }
+}
+
+function closeAllSortMenus() {
+  document.querySelectorAll('.sort-menu').forEach(m => m.classList.remove('show'));
+}
+
+function updatePoolSortMenuActive() {
+  const sortStatePool = state.sortState.pool;
+  const menu = document.getElementById('sort-menu-pool');
+  if (!menu) return;
+  menu.querySelectorAll('.sort-menu-item').forEach(item => {
+    const active = sortStatePool && sortStatePool.type && sortStatePool.order
+      && item.getAttribute('data-type') === sortStatePool.type
+      && item.getAttribute('data-order') === sortStatePool.order;
+    item.classList.toggle('active', active);
+  });
+}
+
+function sortPool(type, order) {
+  const list = state.assignments.pool;
+  if (!list || list.length === 0) {
+    closeAllSortMenus();
+    return;
+  }
+  applySorting(list, type, order);
+  state.sortState.pool = { type, order };
+  pushHistory();
+  closeAllSortMenus();
+  renderAll();
+  const orderText = order === 'asc' ? '昇順' : '降順';
+  const typeText = type === 'name' ? '名前' : type === 'company' ? '会社' : '会社→名前';
+  showToast(`${typeText}（${orderText}）で並び替え完了`, 'indigo');
+}
+
+function applySorting(list, type, order) {
+  const multiplier = order === 'asc' ? 1 : -1;
+  if (type === 'name') list.sort((a, b) => multiplier * a.name.localeCompare(b.name, 'ja'));
+  if (type === 'company') list.sort((a, b) => multiplier * a.company.localeCompare(b.company, 'ja'));
+  if (type === 'company-name') {
+    list.sort((a, b) => {
+      const companyCmp = a.company.localeCompare(b.company, 'ja');
+      if (companyCmp !== 0) return multiplier * companyCmp;
+      return multiplier * a.name.localeCompare(b.name, 'ja');
+    });
+  }
+}
+
+function getSortLabel(sortStatePool) {
+  if (!sortStatePool || !sortStatePool.type) return '並替';
+  const label = sortStatePool.type === 'name' ? '名前' : sortStatePool.type === 'company' ? '会社' : '会社→名';
+  return `${label}${sortStatePool.order === 'asc' ? '↑' : '↓'}`;
+}
+
+function renderAll() {
+  saveScrollPositions();
+  const q = searchQuery;
+
+  const createCard = s => {
+    const isSel = state.selected.has(s.id);
+    const color = state.companyColors[s.company] || '#cbd5e1';
+    const isHit = !q || s.name.toLowerCase().includes(q) || s.company.toLowerCase().includes(q);
+    return `<div draggable="true" data-id="${s.id}" ondragstart="handleDrag(event, '${s.id}')" onmousedown="handleStaffMousedown(event, '${s.id}')"
+class="draggable ${isSel ? 'selected' : ''} ${isHit ? '' : 'search-miss'} bg-white p-2 rounded-lg shadow-sm mb-2 border border-slate-100"
+style="border-left-color: ${color}">
+<div class="text-[9px] font-bold opacity-70 mb-0.5" style="color: ${color}">${s.company}</div>
+<div class="font-bold text-[13px] text-slate-800">${s.name}</div>
+${s.attr ? `<div class="text-[9px] text-slate-400 mt-1 truncate border-t border-slate-50 pt-1">${s.attr}</div>` : ''}
+</div>`;
+  };
+
+  document.getElementById('pool').innerHTML = state.assignments.pool.map(createCard).join('');
+  document.getElementById('poolCount').innerText = state.assignments.pool.length;
+  const poolSortLabel = document.getElementById('sort-label-pool');
+  const poolSortTrigger = document.getElementById('sort-trigger-pool');
+  if (poolSortLabel) {
+    poolSortLabel.innerText = getSortLabel(state.sortState.pool);
+    poolSortTrigger.classList.toggle('active', Boolean(state.sortState.pool && state.sortState.pool.type));
+  }
+
+  const targets = state.floor === 'ALL' ? state.config : state.config.filter(i => i.floor === state.floor);
+  document.getElementById('areaGrid').innerHTML = targets.map(area => {
+    const list = state.assignments[area.id] || [];
+    return `<div class="bg-white rounded-2xl border flex flex-col h-[280px] shadow-sm">
+<div class="px-3 py-2 bg-slate-50 border-b flex justify-between items-center shrink-0">
+<div class="flex flex-col overflow-hidden">
+<span class="text-[11px] font-bold text-slate-600 truncate" title="${area.name}">${area.name}</span>
+<span class="text-[9px] text-slate-400 font-mono">${list.length}名</span>
+</div>
+</div>
+<div id="${area.id}" ondragover="event.preventDefault()" ondrop="handleDrop(event, '${area.id}')" class="flex-grow p-2 overflow-y-auto custom-scrollbar">
+${list.map(createCard).join('')}
+</div>
+</div>`;
+  }).join('');
+  restoreScrollPositions();
+}
+
+function refreshSelectionOnly() {
+  document.querySelectorAll('.draggable').forEach(el => {
+    el.classList.toggle('selected', state.selected.has(el.dataset.id));
+  });
+}
+
+function startMarquee(e) {
+  if (e.target.closest('.draggable') || e.target.closest('button') || e.target.closest('input')) return;
+  isMarquee = true;
+  startX = e.clientX;
+  startY = e.clientY;
+  const box = document.getElementById('selection-box');
+  box.style.display = 'block';
+  box.style.left = `${startX}px`;
+  box.style.top = `${startY}px`;
+  box.style.width = '0px';
+  box.style.height = '0px';
+  if (!e.ctrlKey) {
+    state.selected.clear();
+    refreshSelectionOnly();
+  }
+}
+
+function updateMarquee(e) {
+  if (!isMarquee) return;
+  const x = Math.min(startX, e.clientX);
+  const y = Math.min(startY, e.clientY);
+  const w = Math.abs(startX - e.clientX);
+  const h = Math.abs(startY - e.clientY);
+  const box = document.getElementById('selection-box');
+  box.style.left = `${x}px`;
+  box.style.top = `${y}px`;
+  box.style.width = `${w}px`;
+  box.style.height = `${h}px`;
+
+  document.querySelectorAll('.draggable').forEach(el => {
+    const r = el.getBoundingClientRect();
+    const intersects = !(r.right < x || r.left > x + w || r.bottom < y || r.top > y + h);
+    if (intersects) state.selected.add(el.dataset.id);
+  });
+  refreshSelectionOnly();
+}
+
+function endMarquee() {
+  if (!isMarquee) return;
+  isMarquee = false;
+  document.getElementById('selection-box').style.display = 'none';
+}
+
+function setupTabs() {
+  const floors = [...new Set(state.config.map(i => i.floor))];
+  const container = document.getElementById('tabContainer');
+  floors.forEach(f => {
+    const btn = document.createElement('button');
+    btn.id = `tab-${f}`;
+    btn.className = 'text-[10px] font-bold px-4 py-1.5 rounded-full bg-white text-slate-500 border border-slate-200 transition-all';
+    btn.innerText = f;
+    btn.onclick = () => filterByFloor(f);
+    container.appendChild(btn);
+  });
+}
+
+function filterByFloor(f) {
+  state.floor = f;
+  document.querySelectorAll('#tabContainer button').forEach(b => b.classList.remove('tab-active'));
+  document.getElementById(`tab-${f}`).classList.add('tab-active');
+  renderAll();
+}
+
+function handleStaffMousedown(e, id) {
+  e.stopPropagation();
+  if (!e.ctrlKey && !state.selected.has(id)) state.selected.clear();
+  state.selected.add(id);
+  refreshSelectionOnly();
+}
+
+function handleDrag(e, id) {
+  const from = Object.keys(state.assignments).find(k => state.assignments[k].some(s => s.id === id));
+  const selectedIds = state.selected.has(id) ? Array.from(state.selected) : [id];
+  e.dataTransfer.setData('text/plain', JSON.stringify({ ids: selectedIds, from }));
+}
+
+function handleDrop(e, to) {
+  e.preventDefault();
+  const raw = e.dataTransfer.getData('text/plain');
+  if (!raw) return;
+
+  const data = JSON.parse(raw);
+  if (data.from === to || !state.assignments[data.from] || !state.assignments[to]) return;
+
+  data.ids.forEach(id => {
+    const idx = state.assignments[data.from].findIndex(s => s.id === id);
+    if (idx !== -1) state.assignments[to].push(state.assignments[data.from].splice(idx, 1)[0]);
+  });
+  state.selected.clear();
+  pushHistory();
+  renderAll();
+}
+
+function showToast(msg, color) {
+  const e = document.createElement('div');
+  e.className = `p-3 rounded-lg shadow-xl text-white font-bold text-xs bg-${color}-600`;
+  e.innerText = msg;
+  document.getElementById('toast-container').appendChild(e);
+  setTimeout(() => e.remove(), 3000);
+}

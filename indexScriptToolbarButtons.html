@@ -1,0 +1,104 @@
+function saveData(btn, actionType = 'CHECK') {
+  const labelSpan = btn.querySelector('span');
+  const icon = btn.querySelector('i');
+  if (actionType === 'CHECK') {
+    btn.disabled = true;
+    btn.classList.add('opacity-75', 'cursor-not-allowed');
+    icon.className = 'fa-solid fa-circle-notch fa-spin';
+    labelSpan.innerText = '処理中...';
+  }
+
+  google.script.run
+    .withSuccessHandler(res => {
+      if (res.confirmNeeded) {
+        const msg = `マスタに存在しない名前が ${res.unknownNames.length} 件あります。\nこれらを削除して保存しますか？`;
+        if (confirm(msg)) saveData(btn, 'DELETE');
+        else saveData(btn, 'KEEP');
+        return;
+      }
+      resetSaveButton(btn);
+      showToast(res.success ? '保存完了' : `エラー: ${res.message}`, res.success ? 'indigo' : 'rose');
+    })
+    .withFailureHandler(err => {
+      resetSaveButton(btn);
+      showToast(`通信エラー: ${err.message}`, 'rose');
+    })
+    .saveAssignmentsToSheet76(JSON.stringify(state.assignments), actionType);
+}
+
+function resetSaveButton(btn) {
+  btn.disabled = false;
+  btn.classList.remove('opacity-75', 'cursor-not-allowed');
+  btn.querySelector('i').className = 'fa-solid fa-save';
+  btn.querySelector('span').innerText = '保存';
+}
+
+function runAutoAssignByMainWork(btn) {
+  const labelSpan = btn.querySelector('span');
+  const icon = btn.querySelector('i');
+  btn.disabled = true;
+  btn.classList.add('opacity-75', 'cursor-not-allowed');
+  icon.className = 'fa-solid fa-circle-notch fa-spin';
+  labelSpan.innerText = '配置中...';
+
+  google.script.run
+    .withSuccessHandler(res => {
+      btn.disabled = false;
+      btn.classList.remove('opacity-75', 'cursor-not-allowed');
+      icon.className = 'fa-solid fa-wand-magic-sparkles';
+      labelSpan.innerText = '自動配置';
+
+      if (!res || !res.success) {
+        showToast(`自動配置エラー: ${res && res.message ? res.message : '不明なエラー'}`, 'rose');
+        return;
+      }
+
+      state.assignments = res.assignments;
+      state.selected.clear();
+      pushHistory();
+      renderAll();
+
+      let msg = `自動配置完了（移動: ${res.movedCount || 0}件）`;
+      if (res.unmatchedMainWorks && res.unmatchedMainWorks.length > 0) {
+        msg += ` 未対応業務: ${res.unmatchedMainWorks.length}件`;
+      }
+      showToast(msg, 'indigo');
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.classList.remove('opacity-75', 'cursor-not-allowed');
+      icon.className = 'fa-solid fa-wand-magic-sparkles';
+      labelSpan.innerText = '自動配置';
+      showToast(`通信エラー: ${err.message}`, 'rose');
+    })
+    .autoAssignByMainWork(JSON.stringify(state.assignments));
+}
+
+function pushHistory() {
+  if (history.pointer < history.stack.length - 1) history.stack.splice(history.pointer + 1);
+  history.stack.push(JSON.parse(JSON.stringify(state.assignments)));
+  if (history.stack.length > 50) history.stack.shift();
+  else history.pointer++;
+  updateHistoryButtons();
+}
+
+function undo() {
+  if (history.pointer <= 0) return;
+  history.pointer--;
+  state.assignments = JSON.parse(JSON.stringify(history.stack[history.pointer]));
+  renderAll();
+  updateHistoryButtons();
+}
+
+function redo() {
+  if (history.pointer >= history.stack.length - 1) return;
+  history.pointer++;
+  state.assignments = JSON.parse(JSON.stringify(history.stack[history.pointer]));
+  renderAll();
+  updateHistoryButtons();
+}
+
+function updateHistoryButtons() {
+  document.getElementById('btn-undo').disabled = history.pointer <= 0;
+  document.getElementById('btn-redo').disabled = history.pointer >= history.stack.length - 1;
+}
