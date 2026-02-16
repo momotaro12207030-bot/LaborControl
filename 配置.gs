@@ -8,6 +8,8 @@ const CONFIG = {
   SHEET_NAMES: {
     ASSIGNMENT: '割り当て',
     STAFF_MASTER: 'スタッフマスタ',
+    OWN_COMPANY: '自社',
+    FIXED_DISPATCH: '固定派遣',
     WORK_MASTER: '作業マスタ',
     COMPANY_MASTER: '会社マスタ',
     PASTE_TARGET: '配置表'
@@ -285,31 +287,29 @@ function applyAutoAssignByMainWork_(data, config, mainWorkMap) {
 
 function getStaffMainWorkMap() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const masterSheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STAFF_MASTER);
   const result = {};
-  if (!masterSheet || masterSheet.getLastRow() < 2) return result;
+  const ownCompanySheet = ss.getSheetByName(CONFIG.SHEET_NAMES.OWN_COMPANY);
+  const fixedDispatchSheet = ss.getSheetByName(CONFIG.SHEET_NAMES.FIXED_DISPATCH);
 
-  const lastCol = Math.max(masterSheet.getLastColumn(), 3);
-  const headers = masterSheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h || '').trim());
-  const headerIndex = {};
-  headers.forEach((h, i) => { if (h) headerIndex[h] = i; });
+  // 自社シート: D列=氏名, E列=メイン業務
+  if (ownCompanySheet && ownCompanySheet.getLastRow() >= 2) {
+    const ownRows = ownCompanySheet.getRange(2, 4, ownCompanySheet.getLastRow() - 1, 2).getValues();
+    ownRows.forEach(row => {
+      const name = String(row[0] || '').trim();
+      const mainWork = String(row[1] || '').trim();
+      if (name) result[name] = mainWork;
+    });
+  }
 
-  const nameIdx =
-    headerIndex['氏名'] ??
-    headerIndex['名前'] ??
-    headerIndex['Name'] ??
-    1;
-  const mainWorkIdx =
-    headerIndex['メイン業務'] ??
-    headerIndex['主作業'] ??
-    2;
-
-  const rows = masterSheet.getRange(2, 1, masterSheet.getLastRow() - 1, lastCol).getValues();
-  rows.forEach(row => {
-    const name = String(row[nameIdx] || '').trim();
-    const mainWork = String(row[mainWorkIdx] || '').trim();
-    if (name) result[name] = mainWork;
-  });
+  // 固定派遣シート: E列=氏名, F列=メイン業務
+  if (fixedDispatchSheet && fixedDispatchSheet.getLastRow() >= 2) {
+    const dispatchRows = fixedDispatchSheet.getRange(2, 5, fixedDispatchSheet.getLastRow() - 1, 2).getValues();
+    dispatchRows.forEach(row => {
+      const name = String(row[0] || '').trim();
+      const mainWork = String(row[1] || '').trim();
+      if (name) result[name] = mainWork;
+    });
+  }
 
   return result;
 }
