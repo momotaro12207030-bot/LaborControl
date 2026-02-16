@@ -56,6 +56,36 @@ function showAdminPanel() {
   SpreadsheetApp.getUi().showModalDialog(html, ' ');
 }
 
+function buildWorkNameToProcessMap_() {
+  const ss = SpreadsheetApp.getActive();
+  const master = ss.getSheetByName("作業マスタ");
+  if (!master) throw new Error("作業マスタ シートが見つかりません");
+
+  // B=工程名(キー), F=作業カテゴリ(値)
+  // 例: Shipdock -> PICK
+  const lastRow = Math.max(master.getLastRow(), 2);
+  const keyRange = master.getRange(2, 2, lastRow - 1, 1).getDisplayValues(); // B2:B
+  const valRange = master.getRange(2, 6, lastRow - 1, 1).getDisplayValues(); // F2:F
+
+  const map = {};
+  for (let i = 0; i < keyRange.length; i++) {
+    const k = normalizeKey_(keyRange[i][0]);
+    const v = (valRange[i][0] || "").trim();
+    if (!k || !v) continue;
+    map[k] = v;
+  }
+  return map;
+}
+
+function normalizeKey_(s) {
+  if (s === null || s === undefined) return "";
+  // 全角スペースを半角に、連続スペースを1つに、前後trim
+  return String(s)
+    .replace(/\u3000/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function showConfirmDialog() {
   const html = HtmlService.createHtmlOutputFromFile('confirmDialog')
     .setWidth(CONFIG.UI.DIALOG_WIDTH)
@@ -102,35 +132,56 @@ function executePaste() {
   pasteToColoredCells_multiRows(sh);
 }
 
-function pasteToColoredCells_multiRows(sh) {
+function pasteToGrayCellsByDB_multiRows(sh) {
   const sRow = CONFIG.PASTE_SETTINGS.START_ROW;
   const nRows = CONFIG.PASTE_SETTINGS.NUM_ROWS;
-  const sCol = CONFIG.PASTE_SETTINGS.SOURCE_COL;
-  const tStart = CONFIG.PASTE_SETTINGS.TARGET_START_COL;
-  const tEnd = CONFIG.PASTE_SETTINGS.TARGET_END_COL;
-  const nCols = tEnd - tStart + 1;
+
+  // 参照元：配置表 I列（工程名）
+  const sourceCol = 9; // I
+
+  // 反映先：J～DA
+  const tStart = 10;   // J
+  const tEnd   = 105;  // DA
+  const nCols  = tEnd - tStart + 1;
+
+  // 判定元：DB～GS（J～DAと同じ幅）
+  const dbStart = 106; // DB
+  const dbEnd   = dbStart + nCols - 1; // GS想定
 
   const actualNumRows = Math.min(nRows, sh.getMaxRows() - sRow + 1);
   if (actualNumRows <= 0) return;
 
-  const sourceValues = sh.getRange(sRow, sCol, actualNumRows, 1).getValues();
+  // B→F の辞書（工程名→作業カテゴリ）
+  const map = buildWorkNameToProcessMap_();
+
+  // I列（工程名）
+  const keys = sh.getRange(sRow, sourceCol, actualNumRows, 1).getDisplayValues();
+
+  // DB側（稼働フラグ/稼働量 0 or 0.25）
+  const dbValues = sh.getRange(sRow, dbStart, actualNumRows, nCols).getValues();
+
+  // 反映先
   const targetRange = sh.getRange(sRow, tStart, actualNumRows, nCols);
   const targetValues = targetRange.getValues();
-  const targetBackgrounds = targetRange.getBackgrounds();
 
   let totalChanged = 0;
+
   for (let r = 0; r < actualNumRows; r++) {
-    const newValue = sourceValues[r][0] || '';
+    const key = normalizeKey_(keys[r][0]);
+    const newValue = (key && map[key]) ? map[key] : ""; // 辞書に無ければ空
+
     for (let c = 0; c < nCols; c++) {
-      const isWhite = normalizeColor_(targetBackgrounds[r][c]) === '#ffffff';
-      targetValues[r][c] = isWhite ? '' : newValue;
-      if (!isWhite) totalChanged++;
+      const active = Number(dbValues[r][c] || 0); // 0 / 0.25 など
+      targetValues[r][c] = active > 0 ? newValue : "";
+      totalChanged++;
     }
   }
 
   targetRange.setValues(targetValues);
-  SpreadsheetApp.getActive().toast(`反映完了: ${totalChanged}箇所`, '完了');
+  SpreadsheetApp.getActive().toast(`反映完了: ${totalChanged}セル`, "完了");
 }
+
+
 
 function normalizeColor_(color) {
   if (!color || color === 'white' || color === 'transparent') return '#ffffff';
